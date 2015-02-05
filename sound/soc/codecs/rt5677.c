@@ -918,7 +918,9 @@ static int rt5677_set_dsp_vad(struct snd_soc_component *component, bool on)
 	if (!IS_ENABLED(CONFIG_SND_SOC_RT5677_SPI))
 		return -ENXIO;
 
+	rt5677->dsp_vad_en = on;
 	dev_info(component->dev, "DSP VAD: on=%d, activity=%d\n", on, activity);
+
 	if (on && !activity) {
 		activity = true;
 
@@ -1005,7 +1007,8 @@ static int rt5677_dsp_vad_put(struct snd_kcontrol *kcontrol,
 	rt5677->dsp_vad_en = !!ucontrol->value.integer.value[0];
 
 	if (snd_soc_component_get_bias_level(component) == SND_SOC_BIAS_OFF)
-		rt5677_set_dsp_vad(component, rt5677->dsp_vad_en);
+		rt5677_set_dsp_vad(component,
+				!!ucontrol->value.integer.value[0]);
 
 	return 0;
 }
@@ -5471,6 +5474,7 @@ static int rt5677_i2c_probe(struct i2c_client *i2c)
 		return -ENOMEM;
 
 	rt5677->dev = &i2c->dev;
+	rt5677->set_dsp_vad = rt5677_set_dsp_vad;
 	i2c_set_clientdata(i2c, rt5677);
 
 	if (i2c->dev.of_node) {

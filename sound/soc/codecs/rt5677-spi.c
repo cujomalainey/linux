@@ -26,6 +26,7 @@
 
 #include <sound/soc.h>
 
+#include "rt5677.h"
 #include "rt5677-spi.h"
 
 #define DRV_NAME "rt5677spi"
@@ -100,6 +101,12 @@ static struct snd_soc_dai_driver rt5677_spi_dai = {
 /* PCM for streaming audio from the DSP buffer */
 static int rt5677_spi_pcm_open(struct snd_pcm_substream *substream)
 {
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_component *component =
+			snd_soc_rtdcom_lookup(rtd, "rt5677");
+	struct rt5677_priv *rt5677 = snd_soc_component_get_drvdata(component);
+
+	rt5677->set_dsp_vad(component, true);
 	snd_soc_set_runtime_hwparams(substream, &rt5677_spi_pcm_hardware);
 	return 0;
 }
@@ -109,10 +116,15 @@ static int rt5677_spi_pcm_close(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_component *component =
 			snd_soc_rtdcom_lookup(rtd, DRV_NAME);
+	struct snd_soc_component *codec_component =
+			snd_soc_rtdcom_lookup(rtd, "rt5677");
+	struct rt5677_priv *rt5677 =
+			snd_soc_component_get_drvdata(codec_component);
 	struct rt5677_dsp *rt5677_dsp =
 			snd_soc_component_get_drvdata(component);
 
 	cancel_delayed_work_sync(&rt5677_dsp->copy_work);
+	rt5677->set_dsp_vad(codec_component, false);
 	return 0;
 }
 

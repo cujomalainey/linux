@@ -1854,6 +1854,8 @@ struct rt5677_priv {
 	struct irq_domain *domain;
 	struct mutex irq_lock;
 	unsigned int irq_en;
+
+	int (*set_dsp_vad)(struct snd_soc_component *component, bool on);
 };
 
 int rt5677_sel_asrc_clk_src(struct snd_soc_component *component,
