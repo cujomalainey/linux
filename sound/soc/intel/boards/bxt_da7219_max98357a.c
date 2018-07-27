@@ -29,6 +29,10 @@
 #include "../../codecs/da7219.h"
 #include "../../codecs/da7219-aad.h"
 
+#if IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
+#define DISABLE_HDMI
+#endif
+
 #define BXT_DIALOG_CODEC_DAI	"da7219-hifi"
 #define BXT_MAXIM_CODEC_DAI	"HiFi"
 #define DUAL_CHANNEL		2
@@ -36,7 +40,9 @@
 
 static struct snd_soc_card *audio_card;
 static struct snd_soc_jack broxton_headset;
+#ifndef DISABLE_HDMI
 static struct snd_soc_jack broxton_hdmi[3];
+#endif
 
 struct bxt_hdmi_pcm {
 	struct list_head head;
@@ -120,6 +126,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	/* digital mics */
 	{"DMic", NULL, "SoC DMIC"},
 
+#ifndef DISABLE_HDMI
 	/* CODEC BE connections */
 	{"HDMI1", NULL, "hif5-0 Output"},
 	{"HDMI2", NULL, "hif6-0 Output"},
@@ -131,6 +138,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"iDisp2 Tx", NULL, "iDisp2_out"},
 	{"hifi1", NULL, "iDisp1 Tx"},
 	{"iDisp1 Tx", NULL, "iDisp1_out"},
+#endif
 
 	/* DMIC */
 	{"dmic01_hifi", NULL, "DMIC01 Rx"},
@@ -222,6 +230,7 @@ static int broxton_da7219_codec_init(struct snd_soc_pcm_runtime *rtd)
 	return ret;
 }
 
+#ifndef DISABLE_HDMI
 static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(rtd->card);
@@ -239,7 +248,9 @@ static int broxton_hdmi_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+#endif
 
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_dapm_context *dapm;
@@ -250,6 +261,7 @@ static int broxton_da7219_fe_init(struct snd_soc_pcm_runtime *rtd)
 
 	return 0;
 }
+#endif
 
 static const unsigned int rates[] = {
 	48000,
@@ -374,6 +386,7 @@ static const struct snd_soc_ops broxton_refcap_ops = {
 
 /* broxton digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link broxton_dais[] = {
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 	/* Front End DAI links */
 	[BXT_DPCM_AUDIO_PB] =
 	{
@@ -473,6 +486,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.nonatomic = 1,
 		.dynamic = 1,
 	},
+#endif
 	/* Back End DAI links */
 	{
 		/* SSP5 - Codec */
@@ -519,6 +533,7 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.dpcm_capture = 1,
 		.no_pcm = 1,
 	},
+#ifndef DISABLE_HDMI
 	{
 		.name = "iDisp1",
 		.id = 3,
@@ -552,10 +567,12 @@ static struct snd_soc_dai_link broxton_dais[] = {
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
+#endif
 };
 
 /* geminilake digital audio interface glue - connects codec <--> CPU */
 static struct snd_soc_dai_link geminilake_dais[] = {
+#if !IS_ENABLED(CONFIG_SND_SOC_SOF_INTEL)
 	/* Front End DAI links */
 	[BXT_DPCM_AUDIO_PB] = {
 		.name = "Bxt Audio Port",
@@ -665,6 +682,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.nonatomic = 1,
 		.dynamic = 1,
 	},
+#endif
 	/* Back End DAI links */
 	{
 		/* SSP1 - Codec */
@@ -711,6 +729,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.dpcm_capture = 1,
 		.no_pcm = 1,
 	},
+#ifndef DISABLE_HDMI
 	{
 		.name = "iDisp1",
 		.id = 3,
@@ -744,6 +763,7 @@ static struct snd_soc_dai_link geminilake_dais[] = {
 		.dpcm_playback = 1,
 		.no_pcm = 1,
 	},
+#endif
 };
 
 static int is_geminilake(void)
@@ -761,11 +781,13 @@ static int is_geminilake(void)
 #define NAME_SIZE	32
 static int bxt_card_late_probe(struct snd_soc_card *card)
 {
+#ifndef DISABLE_HDMI
 	struct bxt_card_private *ctx = snd_soc_card_get_drvdata(card);
 	struct bxt_hdmi_pcm *pcm;
 	struct snd_soc_component *component = NULL;
 	int err, i = 0;
 	char jack_name[NAME_SIZE];
+#endif
 
 	if (is_geminilake())
 		snd_soc_dapm_add_routes(&card->dapm, gemini_map,
@@ -774,6 +796,7 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 		snd_soc_dapm_add_routes(&card->dapm, broxton_map,
 				ARRAY_SIZE(broxton_map));
 
+#ifndef DISABLE_HDMI
 	list_for_each_entry(pcm, &ctx->hdmi_pcm_list, head) {
 		component = pcm->codec_dai->component;
 		snprintf(jack_name, sizeof(jack_name),
@@ -796,7 +819,11 @@ static int bxt_card_late_probe(struct snd_soc_card *card)
 	if (!component)
 		return -EINVAL;
 
-	return hdac_hdmi_jack_port_init(component, &card->dapm);
+	return hdac_hdmi_jack_port_init(codec, &card->dapm);
+#else
+	return 0;
+#endif
+
 }
 
 /* broxton audio machine driver for SPT + da7219 */
