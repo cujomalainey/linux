@@ -4305,6 +4305,8 @@ static const struct snd_soc_dapm_route rt5677_dapm_routes[] = {
 	{ "PDM1R", NULL, "PDM1 R Mux" },
 	{ "PDM2L", NULL, "PDM2 L Mux" },
 	{ "PDM2R", NULL, "PDM2 R Mux" },
+	{ "DSP Buffer", NULL, "SSP0 CODEC IN" },
+	{ "SSP0 CODEC IN", NULL, "DSPTX" },
 };
 
 static const struct snd_soc_dapm_route rt5677_dmic2_clk_1[] = {
