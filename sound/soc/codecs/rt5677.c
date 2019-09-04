@@ -803,6 +803,20 @@ static unsigned int rt5677_set_vad_source(struct rt5677_priv *rt5677)
 	/* Enable Gating Mode with MCLK = enable */
 	regmap_update_bits(rt5677->regmap, RT5677_DIG_MISC, 0x1, 0x1);
 
+	/* 24M->24.576 */
+	regmap_write(rt5677->regmap, RT5677_PLL1_CTRL1,
+		<< RT5677_PLL_N_MASK | << RT5677_PLL_K_SFT 0x1481);
+	regmap_write(rt5677->regmap, RT5677_PLL1_CTRL2, 0xc002);
+
+	// Power on Pll1
+	regmap_update_bits(rt5677->regmap, 0x64, 0x200, 0x200);
+
+        // 24M->24.576
+	regmap_write(rt5677->regmap, RT5677_PLL1_CTRL2, 0xc000);
+
+	// system clock from Pll1
+	regmap_write(rt5677->regmap, RT5677_GLB_CLK1, 0x4000);
+
 	/* Private register, no doc */
 	regmap_update_bits(rt5677->regmap, RT5677_PR_BASE + RT5677_BIAS_CUR4,
 		0x0f00, 0x0100);
