@@ -253,6 +253,53 @@ static ssize_t sof_kernel_msg_inject_dfs_write(struct file *file, const char __u
 	return count;
 };
 
+static ssize_t sof_kernel_msg_inject_ipc4_dfs_write(struct file *file,
+					     const char __user *buffer,
+					     size_t count, loff_t *ppos)
+{
+	struct sof_client_dev *cdev = file->private_data;
+	struct sof_msg_inject_priv *priv = cdev->data;
+	struct sof_ipc4_msg *ipc4_msg = priv->kernel_buffer;
+	size_t data_size;
+	/* int ret; */
+
+	if (*ppos)
+		return 0;
+
+	if (count < sizeof(ipc4_msg->header_u64))
+		return -EINVAL;
+
+	/* copy the header first */
+	if (copy_from_user(&ipc4_msg->header_u64, buffer,
+			   sizeof(ipc4_msg->header_u64)))
+		return -EFAULT;
+
+	data_size = count - sizeof(ipc4_msg->header_u64);
+	if (data_size > priv->max_msg_size)
+		return -EINVAL;
+
+	/* Copy the payload */
+	if (copy_from_user(ipc4_msg->data_ptr,
+			   buffer + sizeof(ipc4_msg->header_u64), data_size))
+		return -EFAULT;
+
+	ipc4_msg->data_size = data_size;
+
+	/* Initialize the reply storage */
+	ipc4_msg = priv->rx_buffer;
+	ipc4_msg->header_u64 = 0;
+	ipc4_msg->data_size = priv->max_msg_size;
+	memset(ipc4_msg->data_ptr, 0, priv->max_msg_size);
+
+	/* ret = sof_ipc4_rx_msg(cdev->sdev); */
+
+	/* return the error code if test failed */
+	/* if (ret < 0) */
+	/* 	return ret; */
+
+	return count;
+};
+
 static int sof_msg_inject_dfs_release(struct inode *inode, struct file *file)
 {
 	debugfs_file_put(file->f_path.dentry);
@@ -283,6 +330,15 @@ static const struct file_operations sof_fw_msg_inject_ipc4_fops = {
 static const struct file_operations sof_kernel_msg_inject_fops = {
 	.open = sof_msg_inject_dfs_open,
 	.write = sof_kernel_msg_inject_dfs_write,
+	.llseek = default_llseek,
+	.release = sof_msg_inject_dfs_release,
+
+	.owner = THIS_MODULE,
+};
+
+static const struct file_operations sof_kernel_msg_inject_ipc4_fops = {
+	.open = sof_msg_inject_dfs_open,
+	.write = sof_kernel_msg_inject_ipc4_dfs_write,
 	.llseek = default_llseek,
 	.release = sof_msg_inject_dfs_release,
 
@@ -329,6 +385,7 @@ static int sof_msg_inject_probe(struct auxiliary_device *auxdev,
 		ipc4_msg->data_ptr = priv->rx_buffer + sizeof(struct sof_ipc4_msg);
 
 		fw_fops = &sof_fw_msg_inject_ipc4_fops;
+		kernel_fops = &sof_kernel_msg_inject_ipc4_fops;
 	} else {
 		fw_fops = &sof_fw_msg_inject_fops;
 		kernel_fops = &sof_kernel_msg_inject_fops;
