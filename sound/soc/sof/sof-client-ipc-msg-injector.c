@@ -18,16 +18,19 @@
 #include <sound/sof/ipc4/header.h>
 
 #include "sof-client.h"
+#include "ipc3-priv.h"
 
 #define SOF_IPC_CLIENT_SUSPEND_DELAY_MS	3000
 
 struct sof_msg_inject_priv {
-	struct dentry *dfs_file;
+	struct dentry *fw_dfs_file;
+	struct dentry *kernel_dfs_file;
 	size_t max_msg_size;
 	enum sof_ipc_type ipc_type;
 
 	void *tx_buffer;
 	void *rx_buffer;
+	void *kernel_buffer;
 };
 
 static int sof_msg_inject_dfs_open(struct inode *inode, struct file *file)
@@ -145,7 +148,7 @@ static int sof_msg_inject_send_message(struct sof_client_dev *cdev)
 	return ret;
 }
 
-static ssize_t sof_msg_inject_dfs_write(struct file *file, const char __user *buffer,
+static ssize_t sof_fw_msg_inject_dfs_write(struct file *file, const char __user *buffer,
 					size_t count, loff_t *ppos)
 {
 	struct sof_client_dev *cdev = file->private_data;
@@ -174,7 +177,7 @@ static ssize_t sof_msg_inject_dfs_write(struct file *file, const char __user *bu
 	return size;
 };
 
-static ssize_t sof_msg_inject_ipc4_dfs_write(struct file *file,
+static ssize_t sof_fw_msg_inject_ipc4_dfs_write(struct file *file,
 					     const char __user *buffer,
 					     size_t count, loff_t *ppos)
 {
@@ -221,6 +224,35 @@ static ssize_t sof_msg_inject_ipc4_dfs_write(struct file *file,
 	return count;
 };
 
+static ssize_t sof_kernel_msg_inject_dfs_write(struct file *file, const char __user *buffer,
+					size_t count, loff_t *ppos)
+{
+	struct sof_client_dev *cdev = file->private_data;
+	struct snd_sof_dev *sdev = cdev->sdev;
+	struct sof_msg_inject_priv *priv = cdev->data;
+	struct sof_ipc_cmd_hdr *hdr = priv->kernel_buffer;
+	ssize_t size;
+
+	if (*ppos)
+		return 0;
+
+	size = simple_write_to_buffer(priv->kernel_buffer, priv->max_msg_size,
+				      ppos, buffer, count);
+	if (size < 0)
+		return size;
+	if (size != count)
+		return -EFAULT;
+
+	if (hdr->size < sizeof(hdr)) {
+		dev_err(sdev->dev, "The received message size is invalid\n");
+		return -EINVAL;
+	}
+
+	sof_ipc3_do_rx_work(sdev, hdr, priv->kernel_buffer);
+
+	return count;
+};
+
 static int sof_msg_inject_dfs_release(struct inode *inode, struct file *file)
 {
 	debugfs_file_put(file->f_path.dentry);
@@ -228,20 +260,29 @@ static int sof_msg_inject_dfs_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static const struct file_operations sof_msg_inject_fops = {
+static const struct file_operations sof_fw_msg_inject_fops = {
 	.open = sof_msg_inject_dfs_open,
 	.read = sof_msg_inject_dfs_read,
-	.write = sof_msg_inject_dfs_write,
+	.write = sof_fw_msg_inject_dfs_write,
 	.llseek = default_llseek,
 	.release = sof_msg_inject_dfs_release,
 
 	.owner = THIS_MODULE,
 };
 
-static const struct file_operations sof_msg_inject_ipc4_fops = {
+static const struct file_operations sof_fw_msg_inject_ipc4_fops = {
 	.open = sof_msg_inject_dfs_open,
 	.read = sof_msg_inject_ipc4_dfs_read,
-	.write = sof_msg_inject_ipc4_dfs_write,
+	.write = sof_fw_msg_inject_ipc4_dfs_write,
+	.llseek = default_llseek,
+	.release = sof_msg_inject_dfs_release,
+
+	.owner = THIS_MODULE,
+};
+
+static const struct file_operations sof_kernel_msg_inject_fops = {
+	.open = sof_msg_inject_dfs_open,
+	.write = sof_kernel_msg_inject_dfs_write,
 	.llseek = default_llseek,
 	.release = sof_msg_inject_dfs_release,
 
@@ -253,7 +294,8 @@ static int sof_msg_inject_probe(struct auxiliary_device *auxdev,
 {
 	struct sof_client_dev *cdev = auxiliary_dev_to_sof_client_dev(auxdev);
 	struct dentry *debugfs_root = sof_client_get_debugfs_root(cdev);
-	static const struct file_operations *fops;
+	static const struct file_operations *fw_fops;
+	static const struct file_operations *kernel_fops;
 	struct device *dev = &auxdev->dev;
 	struct sof_msg_inject_priv *priv;
 	size_t alloc_size;
@@ -272,7 +314,9 @@ static int sof_msg_inject_probe(struct auxiliary_device *auxdev,
 
 	priv->tx_buffer = devm_kmalloc(dev, alloc_size, GFP_KERNEL);
 	priv->rx_buffer = devm_kzalloc(dev, alloc_size, GFP_KERNEL);
-	if (!priv->tx_buffer || !priv->rx_buffer)
+	priv->kernel_buffer = devm_kmalloc(dev, alloc_size, GFP_KERNEL);
+
+	if (!priv->tx_buffer || !priv->rx_buffer || !priv->kernel_buffer)
 		return -ENOMEM;
 
 	if (priv->ipc_type == SOF_INTEL_IPC4) {
@@ -284,15 +328,19 @@ static int sof_msg_inject_probe(struct auxiliary_device *auxdev,
 		ipc4_msg = priv->rx_buffer;
 		ipc4_msg->data_ptr = priv->rx_buffer + sizeof(struct sof_ipc4_msg);
 
-		fops = &sof_msg_inject_ipc4_fops;
+		fw_fops = &sof_fw_msg_inject_ipc4_fops;
 	} else {
-		fops = &sof_msg_inject_fops;
+		fw_fops = &sof_fw_msg_inject_fops;
+		kernel_fops = &sof_kernel_msg_inject_fops;
 	}
 
 	cdev->data = priv;
 
-	priv->dfs_file = debugfs_create_file("ipc_msg_inject", 0644, debugfs_root,
-					     cdev, fops);
+	priv->fw_dfs_file = debugfs_create_file("fw_ipc_msg_inject", 0644, debugfs_root,
+					     cdev, fw_fops);
+	if (kernel_fops)
+		priv->kernel_dfs_file = debugfs_create_file("kernel_ipc_msg_inject", 0644, debugfs_root,
+						     cdev, kernel_fops);
 
 	/* enable runtime PM */
 	pm_runtime_set_autosuspend_delay(dev, SOF_IPC_CLIENT_SUSPEND_DELAY_MS);
@@ -311,7 +359,8 @@ static void sof_msg_inject_remove(struct auxiliary_device *auxdev)
 
 	pm_runtime_disable(&auxdev->dev);
 
-	debugfs_remove(priv->dfs_file);
+	debugfs_remove(priv->kernel_dfs_file);
+	debugfs_remove(priv->fw_dfs_file);
 }
 
 static const struct auxiliary_device_id sof_msg_inject_client_id_table[] = {
